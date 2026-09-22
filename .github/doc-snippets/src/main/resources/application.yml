@@ -1,0 +1,24 @@
+jwt:
+  secret: ${JWT_SECRET:ZmFrZS1zZWNyZXQta2V5LWZvci10ZXN0cy1vbmx5LTMyLWJ5dGVzLWxvbmctISE=}   # test-only key
+  expiration: 900000
+  refresh-expiration: 604800000
+spring:
+  jpa:
+    open-in-view: false
+  mvc:
+    problemdetails:
+      enabled: true          # must not break the custom validation handler (web.md)
+    apiversion:
+      use:
+        header: X-API-Version
+      default: "1.0"
+      supported: "1.0,1.1"
+  http:
+    serviceclient:
+      external:
+        base-url: https://api.example.com
+        read-timeout: 5s
+logging:
+  structured:
+    format:
+      console: logstash
