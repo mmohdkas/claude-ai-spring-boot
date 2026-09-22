@@ -31,7 +31,7 @@
 - Always write Java code as the Spring Boot application.
 - Always use Maven for dependency management.
 - Always create test cases for the generated code both positive and negative.
-- Always generate the CircleCI pipeline in the .circleci directory to verify the code.
+- Always generate a GitHub Actions workflow in `.github/workflows/` to verify the code (build and run all tests with `./mvnw -B verify` on pushes and pull requests to `main` and `develop`).
 - Minimize the amount of code generated.
 - The Maven artifact name must be the same as the parent directory name.
 - Use Semantic Versioning for the Maven project: bump MAJOR for breaking changes, MINOR for new backward-compatible features, PATCH for backward-compatible fixes.

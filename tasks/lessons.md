@@ -11,3 +11,7 @@
 ## Follow the team's Git conventions from the first branch (2026-09-22)
 - **Mistake:** Created branch `boot4-update`; the team uses Git Flow (`feature/<name>`), Conventional Commits and SemVer.
 - **Rule:** Name branches `feature/<kebab-name>` (base: `develop` when it exists), write commits as `type(scope): subject`, and pick the version bump by SemVer impact (breaking → MAJOR), not by habit.
+
+## Check inherited tooling rules too (2026-09-22)
+- **Mistake:** Recommended a CircleCI pipeline because the forked CLAUDE.md said so; the team uses GitHub Actions.
+- **Rule:** Same as the Lombok lesson — CI/CD, build and tooling rules in a forked CLAUDE.md may be upstream's. Default to GitHub Actions (`.github/workflows/`) here.

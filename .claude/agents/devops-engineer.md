@@ -45,6 +45,7 @@ Container orchestration:
 - Runtime configuration
 
 CI/CD implementation:
+- GitHub Actions workflows (`.github/workflows/`) as the default CI/CD platform
 - Pipeline design
 - Build optimization
 - Test automation
