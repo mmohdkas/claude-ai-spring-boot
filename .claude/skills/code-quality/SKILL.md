@@ -184,7 +184,7 @@ return user.getName().toUpperCase();
 - Chained calls without null checks
 - `Optional.get()` without `isPresent()`
 - Returning `null` instead of `Optional` or empty collection
-- Missing `@Nullable`/`@NonNull` on public APIs
+- Missing JSpecify `@Nullable` (`org.jspecify.annotations`) on nullable public API params/returns; packages not marked `@NullMarked` (Spring Framework 7 style — not `org.springframework.lang`)
 
 ### Exception Handling
 

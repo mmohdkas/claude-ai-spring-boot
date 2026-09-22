@@ -4,15 +4,11 @@
 
 ```java
 @RestController
-@RequestMapping("/api/users")
-@Validated
+@RequestMapping("/api/v1/users")
+@RequiredArgsConstructor
 public class UserController {
     private final UserService userService;
-    
-    public UserController(UserService userService) {
-        this.userService = userService;
-    }
-    
+
     @GetMapping
     public ResponseEntity<Page<UserResponse>> getUsers(
             @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
@@ -54,6 +50,35 @@ public class UserController {
 }
 ```
 
+> Serializing `Page` directly produces an unstable JSON shape. Enable
+> `@EnableSpringDataWebSupport(pageSerializationMode = VIA_DTO)` or return `PagedModel`.
+
+## API Versioning (Spring Framework 7)
+
+```java
+@RestController
+@RequestMapping("/api/users")
+public class UserVersionedController {
+
+    @GetMapping(path = "/{id}", version = "1.0")
+    public UserResponse getUserV1(@PathVariable Long id) { ... }
+
+    @GetMapping(path = "/{id}", version = "1.1+")   // 1.1 and later
+    public UserResponseV2 getUserV2(@PathVariable Long id) { ... }
+}
+```
+
+```yaml
+# application.yml - pick one strategy
+spring:
+  mvc:
+    apiversion:
+      use:
+        header: X-API-Version        # or path-segment / query-parameter / media-type-parameter
+      default: "1.0"
+      supported: "1.0,1.1"
+```
+
 ## Request DTOs with Validation
 
 ```java
@@ -76,7 +101,13 @@ public record UserCreateRequest(
     @Min(value = 18, message = "Must be at least 18")
     @Max(value = 120, message = "Must be at most 120")
     Integer age
-) {}
+) {
+    // Records print every component - keep the password out of logs
+    @Override
+    public String toString() {
+        return "UserCreateRequest[email=%s, username=%s, age=%s]".formatted(email, username, age);
+    }
+}
 
 public record UserUpdateRequest(
     @Email(message = "Email must be valid")
@@ -113,89 +144,64 @@ public record UserResponse(
 }
 ```
 
-## Global Exception Handling
+## Global Exception Handling (RFC 9457 Problem Details)
+
+Extend `ResponseEntityExceptionHandler`: every built-in Spring MVC exception (validation, 404, 405, 415, ...)
+is then rendered as `ProblemDetail`, and you override only what needs extra data.
 
 ```java
-@RestControllerAdvice
 @Slf4j
-public class GlobalExceptionHandler {
+@RestControllerAdvice
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ErrorResponse> handleNotFound(
-            ResourceNotFoundException ex, WebRequest request) {
-        log.error("Resource not found: {}", ex.getMessage());
-        ErrorResponse error = new ErrorResponse(
-            HttpStatus.NOT_FOUND.value(),
-            ex.getMessage(),
-            request.getDescription(false),
-            LocalDateTime.now()
-        );
-        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
-    }
-
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ValidationErrorResponse> handleValidation(
-            MethodArgumentNotValidException ex) {
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
+            HttpHeaders headers, HttpStatusCode status, WebRequest request) {
         Map<String, String> errors = ex.getBindingResult()
             .getFieldErrors()
             .stream()
             .collect(Collectors.toMap(
                 FieldError::getField,
-                error -> error.getDefaultMessage() != null
-                    ? error.getDefaultMessage()
-                    : "Invalid value"
+                error -> Objects.requireNonNullElse(error.getDefaultMessage(), "Invalid value"),
+                (first, second) -> first
             ));
 
-        ValidationErrorResponse response = new ValidationErrorResponse(
-            HttpStatus.BAD_REQUEST.value(),
-            "Validation failed",
-            errors,
-            LocalDateTime.now()
-        );
-        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+        ProblemDetail problem = ex.getBody();          // 400, pre-filled by Spring
+        problem.setDetail("Validation failed");
+        problem.setProperty("errors", errors);
+        return handleExceptionInternal(ex, problem, headers, status, request);
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
+        log.warn("Resource not found: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Resource not found");
+        return problem;
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ErrorResponse> handleDataIntegrity(
-            DataIntegrityViolationException ex, WebRequest request) {
+    public ProblemDetail handleDataIntegrity(DataIntegrityViolationException ex) {
         log.error("Data integrity violation", ex);
-        ErrorResponse error = new ErrorResponse(
-            HttpStatus.CONFLICT.value(),
-            "Data integrity violation - resource may already exist",
-            request.getDescription(false),
-            LocalDateTime.now()
-        );
-        return new ResponseEntity<>(error, HttpStatus.CONFLICT);
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
+            "Data integrity violation - resource may already exist");
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleGlobalException(
-            Exception ex, WebRequest request) {
+    public ProblemDetail handleGlobalException(Exception ex) {
         log.error("Unexpected error", ex);
-        ErrorResponse error = new ErrorResponse(
-            HttpStatus.INTERNAL_SERVER_ERROR.value(),
-            "An unexpected error occurred",
-            request.getDescription(false),
-            LocalDateTime.now()
-        );
-        return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+        return ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
+            "An unexpected error occurred");
     }
 }
-
-record ErrorResponse(
-    int status,
-    String message,
-    String path,
-    LocalDateTime timestamp
-) {}
-
-record ValidationErrorResponse(
-    int status,
-    String message,
-    Map<String, String> errors,
-    LocalDateTime timestamp
-) {}
 ```
+
+`ProblemDetail` responses use `application/problem+json` and include `type`, `title`, `status`, `detail`, `instance`
+plus any custom properties (e.g. `errors`) at the top level.
+
+> Don't combine a plain `@ExceptionHandler(MethodArgumentNotValidException.class)` with
+> `spring.mvc.problemdetails.enabled=true`: Boot's built-in handler wins and your `errors` map is lost.
+> Extending `ResponseEntityExceptionHandler` (above) makes Boot's handler back off, so the property is not needed.
 
 ## Custom Validation
 
@@ -210,13 +216,10 @@ public @interface UniqueEmail {
 }
 
 @Component
+@RequiredArgsConstructor
 public class UniqueEmailValidator implements ConstraintValidator<UniqueEmail, String> {
     private final UserRepository userRepository;
 
-    public UniqueEmailValidator(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
-    
     @Override
     public boolean isValid(String email, ConstraintValidatorContext context) {
         if (email == null) return true;
@@ -225,51 +228,78 @@ public class UniqueEmailValidator implements ConstraintValidator<UniqueEmail, St
 }
 ```
 
-## WebClient for External APIs
+## RestClient for External APIs
+
+Use `RestClient` in servlet (blocking) applications; use `WebClient` only in WebFlux applications.
+In Boot 4 the `RestClient.Builder` bean and HTTP interface clients need `spring-boot-starter-restclient`
+(`spring-boot-starter-webmvc` alone does not include it).
 
 ```java
+@Slf4j
 @Configuration
-public class WebClientConfig {
+public class RestClientConfig {
     @Bean
-    public WebClient webClient(WebClient.Builder builder) {
+    public RestClient externalApiClient(RestClient.Builder builder) {
         return builder
             .baseUrl("https://api.example.com")
-            .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            .filter(logRequest())
+            .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+            .requestInterceptor((request, body, execution) -> {
+                log.info("Request: {} {}", request.getMethod(), request.getURI());
+                return execution.execute(request, body);
+            })
             .build();
-    }
-
-    private ExchangeFilterFunction logRequest() {
-        return ExchangeFilterFunction.ofRequestProcessor(request -> {
-            log.info("Request: {} {}", request.method(), request.url());
-            return Mono.just(request);
-        });
     }
 }
 
 @Service
+@RequiredArgsConstructor
 public class ExternalApiService {
-    private final WebClient webClient;
+    private final RestClient externalApiClient;
 
-    public ExternalApiService(WebClient webClient) {
-        this.webClient = webClient;
-    }
-    
-    public Mono<ExternalDataResponse> fetchData(String id) {
-        return webClient
-            .get()
+    public ExternalDataResponse fetchData(String id) {
+        return externalApiClient.get()
             .uri("/data/{id}", id)
             .retrieve()
-            .onStatus(HttpStatusCode::is4xxClientError, response ->
-                Mono.error(new ResourceNotFoundException("External resource not found")))
-            .onStatus(HttpStatusCode::is5xxServerError, response ->
-                Mono.error(new ServiceUnavailableException("External service unavailable")))
-            .bodyToMono(ExternalDataResponse.class)
-            .timeout(Duration.ofSeconds(5))
-            .retry(3);
+            .onStatus(HttpStatusCode::is4xxClientError, (request, response) -> {
+                throw new ResourceNotFoundException("External resource not found");
+            })
+            .onStatus(HttpStatusCode::is5xxServerError, (request, response) -> {
+                throw new ServiceUnavailableException("External service unavailable");
+            })
+            .body(ExternalDataResponse.class);
     }
 }
 ```
+
+## HTTP Interface Clients (declarative)
+
+```java
+@HttpExchange("/data")
+public interface ExternalDataClient {
+    @GetExchange("/{id}")
+    ExternalDataResponse get(@PathVariable String id);
+
+    @PostExchange
+    ExternalDataResponse create(@RequestBody ExternalDataRequest request);
+}
+
+@Configuration
+@ImportHttpServices(group = "external", types = ExternalDataClient.class)
+public class HttpClientsConfig {
+}
+```
+
+```yaml
+# Base URL and timeouts per group
+spring:
+  http:
+    serviceclient:
+      external:
+        base-url: https://api.example.com
+        read-timeout: 5s
+```
+
+Inject `ExternalDataClient` like any other bean. Prefer HTTP interfaces over OpenFeign in new code.
 
 ## CORS Configuration
 
@@ -295,10 +325,11 @@ public class WebConfig implements WebMvcConfigurer {
 |------------|---------|
 | `@RestController` | Marks class as REST controller (combines @Controller + @ResponseBody) |
 | `@RequestMapping` | Maps HTTP requests to handler methods |
-| `@GetMapping/@PostMapping` | HTTP method-specific mappings |
+| `@GetMapping/@PostMapping` | HTTP method-specific mappings (`version` attribute for API versioning) |
 | `@PathVariable` | Extracts values from URI path |
 | `@RequestParam` | Extracts query parameters |
 | `@RequestBody` | Binds request body to method parameter |
 | `@Valid` | Triggers validation on request body |
 | `@RestControllerAdvice` | Global exception handling for REST controllers |
 | `@ResponseStatus` | Sets HTTP status code for method |
+| `@HttpExchange` / `@ImportHttpServices` | Declarative HTTP clients |

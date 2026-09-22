@@ -1,5 +1,22 @@
 # Cloud Native - Spring Cloud
 
+Spring Boot 4.1 pairs with the Spring Cloud **2025.1.x (Oakwood)** release train, from **2025.1.2** onwards
+(earlier 2025.1 releases support Boot 4.0 only):
+
+```xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-dependencies</artifactId>
+            <version>2025.1.3</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+```
+
 ## Spring Cloud Config Server
 
 ```java
@@ -134,6 +151,10 @@ eureka:
 
 ## Spring Cloud Gateway
 
+Gateway 5.x (Spring Cloud 2025.1) uses server-specific starters and property prefixes:
+`spring-cloud-starter-gateway-server-webflux` (reactive) or `spring-cloud-starter-gateway-server-webmvc` (servlet).
+The old `spring-cloud-starter-gateway` artifact and `spring.cloud.gateway.*` properties are gone.
+
 ```java
 @SpringBootApplication
 public class GatewayApplication {
@@ -191,34 +212,62 @@ public class GatewayApplication {
 spring:
   cloud:
     gateway:
-      discovery:
-        locator:
-          enabled: true
-          lower-case-service-id: true
-      default-filters:
-        - DedupeResponseHeader=Access-Control-Allow-Origin
-      globalcors:
-        cors-configurations:
-          '[/**]':
-            allowed-origins: "*"
-            allowed-methods:
-              - GET
-              - POST
-              - PUT
-              - DELETE
-            allowed-headers: "*"
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: true
+              lower-case-service-id: true
+          default-filters:
+            - DedupeResponseHeader=Access-Control-Allow-Origin
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowed-origins: "*"
+                allowed-methods:
+                  - GET
+                  - POST
+                  - PUT
+                  - DELETE
+                allowed-headers: "*"
+```
+
+## Simple Retry & Concurrency Limits - Spring Framework 7
+
+For basic retries no extra library is needed (Spring Retry is no longer managed by Boot 4):
+
+```java
+@Configuration
+@EnableResilientMethods
+public class ResilienceConfig {
+}
+
+@Service
+@RequiredArgsConstructor
+public class InventoryClient {
+    private final RestClient inventoryRestClient;
+
+    @Retryable(includes = RestClientException.class, maxRetries = 3, delay = 500, multiplier = 2)
+    @ConcurrencyLimit(10)   // at most 10 concurrent calls
+    public Stock getStock(String sku) {
+        return inventoryRestClient.get().uri("/stock/{sku}", sku).retrieve().body(Stock.class);
+    }
+}
+// Annotations: org.springframework.resilience.annotation.{EnableResilientMethods, Retryable, ConcurrencyLimit}
 ```
 
 ## Circuit Breaker - Resilience4j
 
+Use Resilience4j when you need circuit breakers, rate limiters or bulkheads.
+Dependencies: `spring-cloud-starter-circuitbreaker-resilience4j` (or `io.github.resilience4j:resilience4j-spring-boot4`),
+plus `resilience4j-reactor` for `Mono`/`Flux` return types and `spring-boot-starter-aspectj` for the annotations.
+
 ```java
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class ExternalApiService {
     private final WebClient webClient;
-
-    public ExternalApiService(WebClient webClient) {
-        this.webClient = webClient;
-    }
 
     @CircuitBreaker(name = "externalApi", fallbackMethod = "getFallbackData")
     @Retry(name = "externalApi")
@@ -268,23 +317,27 @@ resilience4j:
         timeout-duration: 0s
 ```
 
-## Distributed Tracing - Micrometer Tracing
+## Distributed Tracing - Micrometer Tracing + OpenTelemetry
+
+Add `spring-boot-starter-opentelemetry` (Micrometer Tracing bridge + OTLP exporter).
+Any OTLP backend works (Jaeger, Grafana Tempo, Zipkin with OTLP ingest, ...).
 
 ```java
 // application.yml
 management:
   tracing:
     sampling:
-      probability: 1.0
-  zipkin:
+      probability: 1.0            # lower in production, e.g. 0.1
+  opentelemetry:
     tracing:
-      endpoint: http://localhost:9411/api/v2/spans
+      export:
+        otlp:
+          endpoint: http://localhost:4318/v1/traces
 
-logging:
-  pattern:
-    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"
+// traceId/spanId are added to the MDC and to Boot's default console pattern
+// and structured (JSON) logs automatically - no custom logging.pattern needed.
 
-// Custom spans
+// Custom spans (prefer @Observed or the Observation API for most cases)
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -396,11 +449,12 @@ management:
       enabled: true
     readinessState:
       enabled: true
-  metrics:
-    export:
-      prometheus:
-        enabled: true
-    tags:
+  prometheus:
+    metrics:
+      export:
+        enabled: true               # needs io.micrometer:micrometer-registry-prometheus
+  observations:
+    key-values:
       application: ${spring.application.name}
 ```
 
@@ -430,8 +484,8 @@ spec:
         env:
         - name: SPRING_PROFILES_ACTIVE
           value: "kubernetes"
-        - name: JAVA_OPTS
-          value: "-Xmx512m -Xms256m"
+        - name: JAVA_TOOL_OPTIONS
+          value: "-XX:MaxRAMPercentage=75"   # size heap from the container memory limit
         livenessProbe:
           httpGet:
             path: /actuator/health/liveness
@@ -468,27 +522,32 @@ spec:
 ## Docker Configuration
 
 ```dockerfile
-# Dockerfile (Multi-stage)
-FROM eclipse-temurin:17-jdk-alpine AS build
+# Dockerfile (Multi-stage, layered jar)
+FROM eclipse-temurin:25-jdk-alpine AS build
 WORKDIR /workspace/app
 
 COPY mvnw .
 COPY .mvn .mvn
 COPY pom.xml .
+RUN ./mvnw -B dependency:go-offline
 COPY src src
+RUN ./mvnw -B package -DskipTests \
+    && java -Djarmode=tools -jar target/*.jar extract --layers --launcher --destination target/extracted
 
-RUN ./mvnw install -DskipTests
-RUN mkdir -p target/dependency && (cd target/dependency; jar -xf ../*.jar)
+FROM eclipse-temurin:25-jre-alpine
+RUN addgroup -S app && adduser -S app -G app
+USER app
+WORKDIR /app
+ARG EXTRACTED=/workspace/app/target/extracted
+COPY --from=build ${EXTRACTED}/dependencies/ ./
+COPY --from=build ${EXTRACTED}/spring-boot-loader/ ./
+COPY --from=build ${EXTRACTED}/snapshot-dependencies/ ./
+COPY --from=build ${EXTRACTED}/application/ ./
 
-FROM eclipse-temurin:17-jre-alpine
-VOLUME /tmp
-ARG DEPENDENCY=/workspace/app/target/dependency
-COPY --from=build ${DEPENDENCY}/BOOT-INF/lib /app/lib
-COPY --from=build ${DEPENDENCY}/META-INF /app/META-INF
-COPY --from=build ${DEPENDENCY}/BOOT-INF/classes /app
-
-ENTRYPOINT ["java","-cp","app:app/lib/*","com.example.Application"]
+ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
 ```
+
+Alternative without a Dockerfile: `./mvnw spring-boot:build-image` (Cloud Native Buildpacks).
 
 ## Quick Reference
 

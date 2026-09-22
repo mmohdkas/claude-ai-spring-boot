@@ -1,4 +1,7 @@
-# Security - Spring Security 6
+# Security - Spring Security 7
+
+Lambda DSL only (`and()`, `authorizeRequests()`, `antMatchers()` and `WebSecurityConfigurerAdapter` are gone).
+Starters: `spring-boot-starter-security`, `spring-boot-starter-security-oauth2-resource-server`; tests: `spring-boot-starter-security-test`.
 
 ## Security Configuration
 
@@ -9,27 +12,28 @@
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+            JwtAuthenticationFilter jwtAuthenticationFilter) throws Exception {
         http
-            .csrf(csrf -> csrf
-                .ignoringRequestMatchers("/api/auth/**")
-                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
-            )
+            // Stateless API authenticated by an Authorization header (no cookies) - CSRF does not apply.
+            // Keep CSRF enabled for session/cookie-based login (e.g. CookieCsrfTokenRepository for SPAs).
+            .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**", "/actuator/health").permitAll()
-                .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                .requestMatchers("/api/users/**").hasAnyRole("USER", "ADMIN")
+                .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/v1/users").hasRole("ADMIN")   // listing all users
+                .requestMatchers("/api/v1/users/**").hasAnyRole("USER", "ADMIN")
                 .anyRequest().authenticated()
             )
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
             .exceptionHandling(ex -> ex
-                .authenticationEntryPoint(authenticationEntryPoint())
-                .accessDeniedHandler(accessDeniedHandler())
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                .accessDeniedHandler(new AccessDeniedHandlerImpl())
             )
-            .addFilterBefore(jwtAuthenticationFilter(),
+            .addFilterBefore(jwtAuthenticationFilter,
                            UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -59,27 +63,35 @@ public class SecurityConfig {
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12);
     }
+
+    // The filter is a @Component; stop Boot from also registering it as a plain servlet filter
+    @Bean
+    public FilterRegistrationBean<JwtAuthenticationFilter> jwtFilterRegistration(
+            JwtAuthenticationFilter filter) {
+        FilterRegistrationBean<JwtAuthenticationFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
 }
 ```
 
 ## JWT Authentication Filter
 
 ```java
+// Spring Framework 7 APIs are @NullMarked (JSpecify): parameters are non-null by default,
+// so no @NonNull annotations are needed. Use org.jspecify.annotations.Nullable where null is allowed.
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
 
-    public JwtAuthenticationFilter(JwtService jwtService, UserDetailsService userDetailsService) {
-        this.jwtService = jwtService;
-        this.userDetailsService = userDetailsService;
-    }
-
     @Override
     protected void doFilterInternal(
-            @NonNull HttpServletRequest request,
-            @NonNull HttpServletRequest response,
-            @NonNull FilterChain filterChain) throws ServletException, IOException {
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain) throws ServletException, IOException {
 
         final String authHeader = request.getHeader("Authorization");
         final String jwt;
@@ -115,7 +127,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
         } catch (JwtException e) {
-            log.error("JWT validation failed", e);
+            log.warn("JWT validation failed: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);
@@ -123,7 +135,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 }
 ```
 
-## JWT Service
+## JWT Service (JJWT 0.12+)
+
+Dependencies: `io.jsonwebtoken:jjwt-api` plus `jjwt-impl` and `jjwt-jackson` (runtime).
+For tokens issued by an external IdP, prefer the OAuth2 Resource Server section below instead of JJWT.
 
 ```java
 @Service
@@ -169,13 +184,12 @@ public class JwtService {
             Map<String, Object> extraClaims,
             UserDetails userDetails,
             long expiration) {
-        return Jwts
-            .builder()
-            .setClaims(extraClaims)
-            .setSubject(userDetails.getUsername())
-            .setIssuedAt(new Date(System.currentTimeMillis()))
-            .setExpiration(new Date(System.currentTimeMillis() + expiration))
-            .signWith(getSignInKey(), SignatureAlgorithm.HS256)
+        return Jwts.builder()
+            .claims(extraClaims)
+            .subject(userDetails.getUsername())
+            .issuedAt(new Date(System.currentTimeMillis()))
+            .expiration(new Date(System.currentTimeMillis() + expiration))
+            .signWith(getSignInKey())          // algorithm inferred from key (HS256+ for HMAC)
             .compact();
     }
 
@@ -193,15 +207,14 @@ public class JwtService {
     }
 
     private Claims extractAllClaims(String token) {
-        return Jwts
-            .parserBuilder()
-            .setSigningKey(getSignInKey())
+        return Jwts.parser()
+            .verifyWith(getSignInKey())
             .build()
-            .parseClaimsJws(token)
-            .getBody();
+            .parseSignedClaims(token)
+            .getPayload();
     }
 
-    private Key getSignInKey() {
+    private SecretKey getSignInKey() {
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         return Keys.hmacShaKeyFor(keyBytes);
     }
@@ -212,12 +225,9 @@ public class JwtService {
 
 ```java
 @Service
+@RequiredArgsConstructor
 public class CustomUserDetailsService implements UserDetailsService {
     private final UserRepository userRepository;
-
-    public CustomUserDetailsService(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
 
     @Override
     @Transactional(readOnly = true)
@@ -247,12 +257,9 @@ public class CustomUserDetailsService implements UserDetailsService {
 ```java
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthenticationController {
     private final AuthenticationService authenticationService;
-
-    public AuthenticationController(AuthenticationService authenticationService) {
-        this.authenticationService = authenticationService;
-    }
 
     @PostMapping("/register")
     public ResponseEntity<AuthenticationResponse> register(
@@ -289,21 +296,13 @@ public class AuthenticationController {
 ```java
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class AuthenticationService {
     private final UserRepository userRepository;
+    private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
-
-    public AuthenticationService(UserRepository userRepository,
-                                  PasswordEncoder passwordEncoder,
-                                  JwtService jwtService,
-                                  AuthenticationManager authenticationManager) {
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.jwtService = jwtService;
-        this.authenticationManager = authenticationManager;
-    }
 
     public AuthenticationResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.email())) {
@@ -315,9 +314,10 @@ public class AuthenticationService {
         user.setPassword(passwordEncoder.encode(request.password()));
         user.setUsername(request.username());
         user.setActive(true);
-        Role userRole = new Role();
-        userRole.setName("USER");
-        user.setRoles(Set.of(userRole));
+        // Load the existing role - a new transient Role would fail on save (no cascade on @ManyToMany)
+        Role userRole = roleRepository.findByName("USER")
+            .orElseThrow(() -> new IllegalStateException("Role USER not seeded"));
+        user.setRoles(new HashSet<>(Set.of(userRole)));
 
         user = userRepository.save(user);
 
@@ -475,5 +475,5 @@ public class OAuth2ResourceServerConfig {
 - Validate all user inputs
 - Log security events
 - Keep dependencies updated
-- Use CSRF protection for state-changing operations
+- Use CSRF protection for state-changing operations when authentication relies on cookies/sessions
 - Implement proper session timeout

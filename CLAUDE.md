@@ -31,11 +31,14 @@
 - Always write Java code as the Spring Boot application.
 - Always use Maven for dependency management.
 - Always create test cases for the generated code both positive and negative.
-- Always generate the CircleCI pipeline in the .circleci directory to verify the code.
+- Always generate a GitHub Actions workflow in `.github/workflows/` to verify the code (build and run all tests with `./mvnw -B verify` on pushes and pull requests to `main` and `develop`).
 - Minimize the amount of code generated.
+- Every file must end with a newline (see `.editorconfig`; CI fails otherwise).
 - The Maven artifact name must be the same as the parent directory name.
-- Use semantic versioning for the Maven project. Each time you generate a new version, bump the PATCH section of the version number.
-- Use `pl.piomin.services` as the group ID for the Maven project and base Java package.
-- Do not use the Lombok library.
+- Use Semantic Versioning for the Maven project: bump MAJOR for breaking changes, MINOR for new backward-compatible features, PATCH for backward-compatible fixes.
+- Use Git Flow branches (`feature/*`, `release/*`, `hotfix/*` from `develop`/`main`) and Conventional Commits (`type(scope): subject`) for commit messages and PR titles.
+- Use `edu.iu.es.ep` as the group ID for the Maven project and base Java package.
+- Use Lombok to reduce boilerplate. On JPA entities use `@Getter`/`@Setter` (+ `@NoArgsConstructor`, and `@Builder` with `@AllArgsConstructor` when needed). Never use `@Data`, `@ToString` or `@EqualsAndHashCode` on entities.
+- For DTOs prefer Java records; use Lombok `@Value`/`@Data` only for classes that can't be records. Never include secrets (passwords, tokens) in `toString()`: override it on records, or use `@ToString.Exclude`.
 - Generate the Docker Compose file to run all components used by the application.
 - Update README.md each time you generate a new version.
