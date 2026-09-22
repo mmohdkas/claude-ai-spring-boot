@@ -423,8 +423,10 @@ class UserRepositoryTest {
 ## Testcontainers for Database
 
 ```java
-// Testcontainers 2.x: org.testcontainers.postgresql.PostgreSQLContainer (no generic type)
-@SpringBootTest
+// Testcontainers 2.x: org.testcontainers.postgresql.PostgreSQLContainer (no generic type).
+// A real database starts empty: let Flyway/Liquibase migrations create the schema, or (without migrations)
+// let Hibernate do it as below.
+@SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
 @Testcontainers
 class UserServiceIntegrationTest {
 
