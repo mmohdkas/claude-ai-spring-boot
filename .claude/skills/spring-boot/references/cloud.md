@@ -1,6 +1,7 @@
 # Cloud Native - Spring Cloud
 
-Spring Boot 4.x pairs with the Spring Cloud **2025.1.x (Oakwood)** release train:
+Spring Boot 4.1 pairs with the Spring Cloud **2025.1.x (Oakwood)** release train, from **2025.1.2** onwards
+(earlier 2025.1 releases support Boot 4.0 only):
 
 ```xml
 <dependencyManagement>

@@ -1,6 +1,6 @@
 {
   "name": "spring-boot-plugin",
-  "description": "Complete Spring Boot development template with agents, skills, and best practices for enterprise Java applications. Includes JPA patterns, code quality checks, and Spring Boot 4.x support.",
+  "description": "Complete Spring Boot development template with agents, skills, and best practices for enterprise Java applications. Includes JPA patterns, code quality checks, and Spring Boot 4.1 support.",
   "version": "2.0.0",
   "author": {
     "name": "Piotr Mińkowski"
