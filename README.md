@@ -68,6 +68,7 @@ Spring Boot 4.1.x (Spring Framework 7, Spring Security 7, Hibernate 7, Jackson 3
   - Framework 7 `@Retryable`/`@ConcurrencyLimit`, OpenTelemetry tracing, Gateway 5 properties
 - Lombok patterns documented with entity-safe rules (`@Getter`/`@Setter`, no `@Data`/`@ToString`/`@EqualsAndHashCode` on entities); records preferred for DTOs, secrets kept out of `toString()`
 - Git Flow, Conventional Commits and Semantic Versioning documented in CLAUDE.md
+- CI/CD convention switched from CircleCI to GitHub Actions
 - Restored `jpa-patterns` and `logging-patterns` skills that had been truncated mid-file
 - Fixed non-compiling examples (text block, filter signature, effectively-final lambda capture, mixed repository/service code)
 - Removed non-functional "context manager" protocol from agents; agent cross-references now point only to agents in this repo
