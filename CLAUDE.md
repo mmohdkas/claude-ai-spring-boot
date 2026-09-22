@@ -34,8 +34,10 @@
 - Always generate the CircleCI pipeline in the .circleci directory to verify the code.
 - Minimize the amount of code generated.
 - The Maven artifact name must be the same as the parent directory name.
-- Use semantic versioning for the Maven project. Each time you generate a new version, bump the PATCH section of the version number.
-- Use `pl.piomin.services` as the group ID for the Maven project and base Java package.
-- Do not use the Lombok library.
+- Use Semantic Versioning for the Maven project: bump MAJOR for breaking changes, MINOR for new backward-compatible features, PATCH for backward-compatible fixes.
+- Use Git Flow branches (`feature/*`, `release/*`, `hotfix/*` from `develop`/`main`) and Conventional Commits (`type(scope): subject`) for commit messages and PR titles.
+- Use `edu.iu.es.ep` as the group ID for the Maven project and base Java package.
+- Use Lombok to reduce boilerplate. On JPA entities use `@Getter`/`@Setter` (+ `@NoArgsConstructor`, and `@Builder` with `@AllArgsConstructor` when needed). Never use `@Data`, `@ToString` or `@EqualsAndHashCode` on entities.
+- For DTOs prefer Java records; use Lombok `@Value`/`@Data` only for classes that can't be records. Never include secrets (passwords, tokens) in `toString()`: override it on records, or use `@ToString.Exclude`.
 - Generate the Docker Compose file to run all components used by the application.
 - Update README.md each time you generate a new version.
