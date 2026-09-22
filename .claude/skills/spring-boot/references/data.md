@@ -9,6 +9,10 @@
     @Index(name = "idx_username", columnList = "username")
 })
 @EntityListeners(AuditingEntityListener.class)
+@Getter @Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class User {
 
     @Id
@@ -24,10 +28,16 @@ public class User {
     @Column(nullable = false, unique = true, length = 50)
     private String username;
 
+    private Integer age;
+
     @Column(nullable = false)
+    @Builder.Default
     private Boolean active = true;
 
+    private LocalDateTime lastLoginAt;
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
     private List<Address> addresses = new ArrayList<>();
 
     @ManyToMany
@@ -36,6 +46,7 @@ public class User {
         joinColumns = @JoinColumn(name = "user_id"),
         inverseJoinColumns = @JoinColumn(name = "role_id")
     )
+    @Builder.Default
     private Set<Role> roles = new HashSet<>();
 
     @CreatedDate
@@ -49,55 +60,6 @@ public class User {
     @Version
     private Long version;
 
-    // Constructors
-    public User() {}
-
-    public User(Long id, String email, String password, String username, Boolean active,
-                List<Address> addresses, Set<Role> roles, LocalDateTime createdAt,
-                LocalDateTime updatedAt, Long version) {
-        this.id = id;
-        this.email = email;
-        this.password = password;
-        this.username = username;
-        this.active = active != null ? active : true;
-        this.addresses = addresses != null ? addresses : new ArrayList<>();
-        this.roles = roles != null ? roles : new HashSet<>();
-        this.createdAt = createdAt;
-        this.updatedAt = updatedAt;
-        this.version = version;
-    }
-
-    // Getters and Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
-
-    public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
-
-    public String getUsername() { return username; }
-    public void setUsername(String username) { this.username = username; }
-
-    public Boolean getActive() { return active; }
-    public void setActive(Boolean active) { this.active = active; }
-
-    public List<Address> getAddresses() { return addresses; }
-    public void setAddresses(List<Address> addresses) { this.addresses = addresses; }
-
-    public Set<Role> getRoles() { return roles; }
-    public void setRoles(Set<Role> roles) { this.roles = roles; }
-
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-
-    public Long getVersion() { return version; }
-    public void setVersion(Long version) { this.version = version; }
-
     // Helper methods for bidirectional relationships
     public void addAddress(Address address) {
         addresses.add(address);
@@ -108,8 +70,26 @@ public class User {
         addresses.remove(address);
         address.setUser(null);
     }
+
+    // ID-based equality: stable across persist/merge, never touches lazy associations
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof User other)) return false;
+        return id != null && id.equals(other.getId());
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }
 ```
+
+Lombok rules for entities (same pattern for `Role`, `Address`, `Order`):
+- `@Getter @Setter @NoArgsConstructor` always; add `@AllArgsConstructor @Builder` when a builder is needed (tests, factories)
+- `@Builder.Default` on initialized fields, otherwise the builder leaves them `null`
+- Never `@Data`, `@ToString` or `@EqualsAndHashCode` - they touch lazy associations and recurse on bidirectional links
 
 ## Spring Data JPA Repository
 
@@ -137,9 +117,9 @@ public interface UserRepository extends JpaRepository<User, Long>,
     int deactivateInactiveUsers(@Param("threshold") LocalDateTime threshold);
 
     // Projection for read-only DTOs
-    @Query("SELECT new com.example.dto.UserSummary(u.id, u.username, u.email) " +
+    @Query("SELECT new edu.iu.es.ep.dto.UserSummaryDto(u.id, u.username, u.email) " +
            "FROM User u WHERE u.active = true")
-    List<UserSummary> findAllActiveSummaries();
+    List<UserSummaryDto> findAllActiveSummaries();
 }
 ```
 
@@ -172,13 +152,10 @@ public class UserSpecifications {
 
 // Usage in service
 @Service
+@RequiredArgsConstructor
 public class UserService {
     private final UserRepository userRepository;
 
-    public UserService(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
-    
     public Page<User> searchUsers(UserSearchCriteria criteria, Pageable pageable) {
         Specification<User> spec = Specification
             .where(UserSpecifications.hasEmail(criteria.email()))
@@ -193,21 +170,17 @@ public class UserService {
 ## Transaction Management
 
 ```java
+@Slf4j
 @Service
+@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class OrderService {
     private final OrderRepository orderRepository;
+    private final OrderEventRepository orderEventRepository;
     private final PaymentService paymentService;
     private final InventoryService inventoryService;
     private final NotificationService notificationService;
 
-    public OrderService(OrderRepository orderRepository, PaymentService paymentService, InventoryService inventoryService, NotificationService notificationService) {
-        this.orderRepository = orderRepository;
-        this.paymentService = paymentService;
-        this.inventoryService = inventoryService;
-        this.notificationService = notificationService;
-    }
-    
     @Transactional
     public Order createOrder(OrderCreateRequest request) {
         // All operations in single transaction
@@ -221,19 +194,22 @@ public class OrderService {
             order.addItem(item);
         });
 
-        order = orderRepository.save(order);
+        Order saved = orderRepository.save(order); // `order` stays effectively final for the lambda
 
         try {
-            paymentService.processPayment(order);
-            order.setStatus(OrderStatus.PAID);
+            paymentService.processPayment(saved);
+            saved.setStatus(OrderStatus.PAID);   // managed entity - flushed on commit, no second save()
         } catch (PaymentException e) {
-            order.setStatus(OrderStatus.PAYMENT_FAILED);
+            saved.setStatus(OrderStatus.PAYMENT_FAILED);
             throw e; // Transaction will rollback
         }
 
-        return orderRepository.save(order);
+        return saved;
     }
 
+    // NOTE: propagation only applies when called through the Spring proxy.
+    // Calling this from another method of OrderService (self-invocation) runs it
+    // in the caller's transaction - move it to a separate bean in real code.
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void logOrderEvent(Long orderId, String event) {
         // Separate transaction - will commit even if parent rolls back
@@ -246,8 +222,7 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
             .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
-        order.setStatus(OrderStatus.COMPLETED);
-        orderRepository.save(order);
+        order.setStatus(OrderStatus.COMPLETED); // dirty checking persists the change
 
         // Won't rollback transaction if notification fails
         try {
@@ -314,8 +289,8 @@ public interface UserSummary {
     String getUsername();
     String getEmail();
 
-    @Value("#{target.firstName + ' ' + target.lastName}")
-    String getFullName();
+    @Value("#{target.username + ' <' + target.email + '>'}")
+    String getDisplayName();   // open projection - selects the full entity
 }
 
 // Class-based projection (DTO)
@@ -340,33 +315,24 @@ List<UserSummaryDto> dtos = userRepository.findAllBy(UserSummaryDto.class);
 ## Query Optimization
 
 ```java
-@Service
-@RequiredArgsConstructor
-@Transactional(readOnly = true)
-public class UserQueryService {
-    private final UserRepository userRepository;
-    private final EntityManager entityManager;
+// Repository: fetch associations explicitly instead of relying on lazy loading
+public interface UserRepository extends JpaRepository<User, Long> {
 
-    // N+1 problem solved with JOIN FETCH
-    @Query("SELECT DISTINCT u FROM User u " +
-           "LEFT JOIN FETCH u.addresses " +
-           "LEFT JOIN FETCH u.roles " +
-           "WHERE u.active = true")
+    // N+1 solved with JOIN FETCH (DISTINCT is implicit for entity results in Hibernate 6+)
+    @Query("""
+        SELECT u FROM User u
+        LEFT JOIN FETCH u.addresses
+        LEFT JOIN FETCH u.roles
+        WHERE u.active = true
+        """)
     List<User> findAllActiveWithAssociations();
 
-    // Batch fetching
-    @BatchSize(size = 25)
-    @OneToMany(mappedBy = "user")
-    private List<Order> orders;
-
-    // EntityGraph for dynamic fetching
+    // EntityGraph for declarative fetching
     @EntityGraph(attributePaths = {"addresses", "roles"})
     List<User> findAllByActiveTrue();
 
-    // Pagination to avoid loading all data
-    public Page<User> findAllUsers(Pageable pageable) {
-        return userRepository.findAll(pageable);
-    }
+    // Pagination to avoid loading all data (never JOIN FETCH collections with Pageable)
+    Page<User> findAllByActiveTrue(Pageable pageable);
 
     // Native query for complex queries
     @Query(value = """
@@ -379,6 +345,20 @@ public class UserQueryService {
     List<User> findFrequentBuyers(@Param("since") LocalDateTime since,
                                   @Param("minOrders") int minOrders);
 }
+
+// Entity: batch fetching loads lazy collections for 25 parents in one query
+@Entity
+@Getter @Setter
+@NoArgsConstructor
+public class Customer {
+    @Id @GeneratedValue
+    private Long id;
+
+    @BatchSize(size = 25)
+    @OneToMany(mappedBy = "customer")
+    private List<Order> orders = new ArrayList<>();
+}
+// Or globally: spring.jpa.properties.hibernate.default_batch_fetch_size=25
 ```
 
 ## Database Migrations (Flyway)
