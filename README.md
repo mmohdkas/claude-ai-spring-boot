@@ -38,12 +38,25 @@ The idea behind this template is that you can just clone this repository and use
 │               └── web.md
 ├── .claude-plugin
 │   └── plugin.json
+├── .github
+│   ├── doc-snippets        # CI-only: compiles/tests the skills' java blocks
+│   └── workflows
+│       └── ci.yml
 ├── tasks
 │   └── lessons.md
 ├── CLAUDE.md
 ├── LICENSE
 ├── README.md
 └── pom.xml
+```
+
+## CI
+
+The `CI` workflow extracts every java block from `.claude/skills` (see `.github/doc-snippets/extract.py`),
+compiles it against Spring Boot 4 and runs the test snippets. Run it locally with:
+
+```bash
+mvn -B -f .github/doc-snippets/pom.xml verify
 ```
 
 ## Target Stack
@@ -69,6 +82,8 @@ Spring Boot 4.1.x (Spring Framework 7, Spring Security 7, Hibernate 7, Jackson 3
 - Lombok patterns documented with entity-safe rules (`@Getter`/`@Setter`, no `@Data`/`@ToString`/`@EqualsAndHashCode` on entities); records preferred for DTOs, secrets kept out of `toString()`
 - Git Flow, Conventional Commits and Semantic Versioning documented in CLAUDE.md
 - CI/CD convention switched from CircleCI to GitHub Actions
+- GitHub Actions `CI` workflow: checks Markdown structure and compiles/tests the skills' java blocks
+  against Spring Boot 4 (`.github/doc-snippets`); required on `main` and `develop`
 - Restored `jpa-patterns` and `logging-patterns` skills that had been truncated mid-file
 - Fixed non-compiling examples (text block, filter signature, effectively-final lambda capture, mixed repository/service code)
 - Removed non-functional "context manager" protocol from agents; agent cross-references now point only to agents in this repo

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Check Markdown structure
+        run: |
+          status=0
+          for f in $(git ls-files '*.md'); do
+            n=$(grep -c '^ *```' "$f" || true)
+            if [ $((n % 2)) -ne 0 ]; then echo "::error file=$f::unbalanced code fences ($n)"; status=1; fi
+          done
+          for f in .claude/skills/*/SKILL.md .claude/agents/*.md; do
+            head -1 "$f" | grep -q '^---$' && grep -q '^name:' "$f" && grep -q '^description:' "$f" \
+              || { echo "::error file=$f::missing frontmatter (name, description)"; status=1; }
+          done
+          exit $status
+
+      # Extracts the java blocks from .claude/skills and compiles/tests them against Spring Boot 4
+      - name: Verify doc snippets
+        run: mvn -B -ntp -f .github/doc-snippets/pom.xml verify
