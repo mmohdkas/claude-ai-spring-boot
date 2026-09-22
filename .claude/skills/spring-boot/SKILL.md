@@ -1,8 +1,8 @@
 ---
 name: spring-boot
-description: Spring Boot 3.x development - REST APIs, JPA, Security, Testing, and Cloud-native patterns. Use for building enterprise Java applications with Spring Boot.
+description: Spring Boot 4.x development - REST APIs, JPA, Security, Testing, and Cloud-native patterns. Use for building enterprise Java applications with Spring Boot.
 metadata:
-  version: "2.0.0"
+  version: "3.0.0"
   domain: backend
   triggers: Spring Boot, Spring Framework, Spring Security, Spring Data JPA, Spring WebFlux, Java REST API, Microservices Java
   role: specialist
@@ -12,7 +12,7 @@ metadata:
 
 # Spring Boot Skill
 
-Enterprise Spring Boot 3.x development with focus on clean architecture and production-ready code.
+Enterprise Spring Boot 4.x development with focus on clean architecture and production-ready code.
 
 ## Core Workflow
 
@@ -23,12 +23,44 @@ Enterprise Spring Boot 3.x development with focus on clean architecture and prod
 5. **Test** - Write unit, integration tests; run `./mvnw test` and confirm all pass
 6. **Deploy** - Configure health checks via Actuator; validate `/actuator/health` returns UP
 
+## Boot 4 Essentials
+
+- **Modular starters** - `spring-boot-starter-webmvc` (was `-web`), `-aspectj` (was `-aop`), `-security-oauth2-resource-server`; each has a matching test starter (`spring-boot-starter-webmvc-test`, `-data-jpa-test`, `-security-test`)
+- **Jackson 3** - packages `tools.jackson.*` (annotations stay in `com.fasterxml.jackson.annotation`); inject `JsonMapper`, customize with `JsonMapperBuilderCustomizer`, `@JacksonComponent` replaces `@JsonComponent`
+- **Null safety** - JSpecify (`org.jspecify.annotations.Nullable`) replaces `org.springframework.lang` annotations
+- **Testing** - `@MockitoBean`/`@MockitoSpyBean` (`@MockBean` is removed); `RestTestClient` + `@AutoConfigureRestTestClient` for HTTP integration tests
+- **HTTP clients** - `RestClient` and HTTP interface clients (`@HttpExchange` + `@ImportHttpServices`); `RestTemplate` only for legacy code
+- **API versioning** - `@GetMapping(path = "/{id}", version = "1.1")` + `spring.mvc.apiversion.*`
+- **Resilience** - `@Retryable` / `@ConcurrencyLimit` from `org.springframework.resilience.annotation` (enable with `@EnableResilientMethods`); Spring Retry is no longer managed
+- **Upgrading** - add `spring-boot-properties-migrator` (runtime scope) temporarily to report renamed properties
+
 ## Quick Start Templates
+
+### Dependencies
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webmvc</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+    <optional>true</optional>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webmvc-test</artifactId>
+    <scope>test</scope>
+</dependency>
+<!-- Register Lombok in maven-compiler-plugin <annotationProcessorPaths> -->
+```
 
 ### Entity
 ```java
 @Entity
 @Table(name = "products")
+@Getter @Setter
+@NoArgsConstructor
 public class Product {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -39,8 +71,6 @@ public class Product {
 
     @DecimalMin("0.0")
     private BigDecimal price;
-
-    // Getters/Setters (no Lombok)
 }
 ```
 
@@ -54,13 +84,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 ### Service
 ```java
 @Service
+@RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ProductService {
     private final ProductRepository repo;
-
-    public ProductService(ProductRepository repo) {
-        this.repo = repo;
-    }
 
     public List<Product> search(String name) {
         return repo.findByNameContainingIgnoreCase(name);
@@ -80,13 +107,9 @@ public class ProductService {
 ```java
 @RestController
 @RequestMapping("/api/v1/products")
-@Validated
+@RequiredArgsConstructor
 public class ProductController {
     private final ProductService service;
-
-    public ProductController(ProductService service) {
-        this.service = service;
-    }
 
     @GetMapping
     public List<Product> search(@RequestParam(defaultValue = "") String name) {
@@ -109,22 +132,24 @@ public record ProductRequest(
 ) {}
 ```
 
-### Global Exception Handler
+### Global Exception Handler (RFC 9457 Problem Details)
 ```java
 @RestControllerAdvice
-public class GlobalExceptionHandler {
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public Map<String, String> handleValidation(MethodArgumentNotValidException ex) {
-        return ex.getBindingResult().getFieldErrors().stream()
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
+            HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        ProblemDetail problem = ex.getBody();
+        problem.setProperty("errors", ex.getBindingResult().getFieldErrors().stream()
             .collect(Collectors.toMap(FieldError::getField,
-                    error -> error.getDefaultMessage() != null ? error.getDefaultMessage() : "Invalid"));
+                    error -> Objects.requireNonNullElse(error.getDefaultMessage(), "Invalid"),
+                    (first, second) -> first)));
+        return handleExceptionInternal(ex, problem, headers, status, request);
     }
 
     @ExceptionHandler(EntityNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public Map<String, String> handleNotFound(EntityNotFoundException ex) {
-        return Map.of("error", ex.getMessage());
+    public ProblemDetail handleNotFound(EntityNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 }
 ```
@@ -134,7 +159,7 @@ public class GlobalExceptionHandler {
 @WebMvcTest(ProductController.class)
 class ProductControllerTest {
     @Autowired MockMvc mockMvc;
-    @MockBean ProductService service;
+    @MockitoBean ProductService service;
 
     @Test
     void createProduct_validRequest_returns201() throws Exception {
@@ -144,9 +169,22 @@ class ProductControllerTest {
 
         mockMvc.perform(post("/api/v1/products")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"name":"Widget","price":10.0}"""))
+                .content("""
+                    {"name":"Widget","price":10.0}
+                    """))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.name").value("Widget"));
+    }
+
+    @Test
+    void createProduct_blankName_returns400() throws Exception {
+        mockMvc.perform(post("/api/v1/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":"","price":10.0}
+                    """))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.errors.name").exists());
     }
 }
 ```
@@ -157,36 +195,37 @@ Load detailed patterns based on context:
 
 | Topic | Reference | When to Load |
 |-------|-----------|-------------|
-| Web/REST | `references/web.md` | Controllers, validation, exception handling |
+| Web/REST | `references/web.md` | Controllers, validation, Problem Details, HTTP clients, API versioning |
 | Data Access | `references/data.md` | JPA, repositories, transactions, queries |
-| Security | `references/security.md` | Spring Security 6, OAuth2, JWT, auth |
-| Cloud/Config | `references/cloud.md` | Config server, discovery, resilience |
-| Testing | `references/testing.md` | Unit, integration, slice tests |
+| Security | `references/security.md` | Spring Security 7, OAuth2, JWT, auth |
+| Cloud/Config | `references/cloud.md` | Config server, discovery, gateway, resilience, tracing |
+| Testing | `references/testing.md` | Unit, integration, slice tests, Testcontainers |
 
 ## Constraints
 
 ### MUST DO
-- Constructor injection (no field injection)
+- Constructor injection (`@RequiredArgsConstructor` + `private final` fields)
 - `@Valid` on all request bodies
 - `@Transactional` for multi-step writes
 - `@Transactional(readOnly = true)` for reads
 - Type-safe config with `@ConfigurationProperties`
-- Global exception handling with `@RestControllerAdvice`
+- Global exception handling with `@RestControllerAdvice` extending `ResponseEntityExceptionHandler` (returns `ProblemDetail`)
 - Externalize secrets (use env vars, not properties files)
 
 ### MUST NOT DO
 - Field injection (`@Autowired` on fields)
+- `@Data`, `@ToString`, `@EqualsAndHashCode` on JPA entities
 - Skip input validation on endpoints
 - Mix blocking and reactive code
 - Store secrets in application.properties
-- Use deprecated Spring Boot 2.x patterns
+- Use deprecated or removed Spring Boot 2.x/3.x patterns (`@MockBean`, `WebSecurityConfigurerAdapter`, `spring-boot-starter-web`, `com.fasterxml.jackson.databind`)
 - Hardcode URLs, credentials, environment values
 
 ## Architecture Patterns
 
 **Project Structure:**
 ```
-src/main/java/pl/piomin/services/
+src/main/java/edu/iu/es/ep/
 ├── controller/     # REST endpoints
 ├── service/        # Business logic
 ├── repository/     # Data access
@@ -219,18 +258,16 @@ src/main/java/pl/piomin/services/
 | `@Valid` | Trigger validation |
 | `@ConfigurationProperties` | Bind properties to class |
 | `@EnableMethodSecurity` | Enable method security |
+| `@RequiredArgsConstructor` | Lombok constructor for `final` fields (constructor injection) |
 
 ## Reactive WebFlux Endpoint
 
 ```java
 @RestController
 @RequestMapping("/api/v1/orders")
+@RequiredArgsConstructor
 public class OrderController {
     private final OrderService orderService;
-
-    public OrderController(OrderService orderService) {
-        this.orderService = orderService;
-    }
 
     @GetMapping("/{id}")
     public Mono<ResponseEntity<OrderDto>> getOrder(@PathVariable UUID id) {
@@ -269,4 +306,4 @@ public class SecurityConfig {
 
 ## Knowledge Base
 
-Spring Boot 3.x, Java 21, Spring WebFlux, Project Reactor, Spring Data JPA, Spring Security 6, OAuth2/JWT, Hibernate, R2DBC, Spring Cloud, Resilience4j, Micrometer, JUnit 5, TestContainers, Mockito, Maven/Gradle
+Spring Boot 4.x, Spring Framework 7, Java 25 (17+ minimum), Spring WebMVC, Spring WebFlux, Project Reactor, Spring Data JPA, Hibernate 7, Spring Security 7, OAuth2/JWT, Jackson 3, R2DBC, Spring Cloud 2025.1, Resilience4j, Micrometer, OpenTelemetry, JUnit 6, Testcontainers 2, Mockito, Lombok, Maven/Gradle
