@@ -27,6 +27,14 @@ jobs:
           java-version: '25'
           cache: maven
 
+      - name: Check final newlines
+        run: |
+          missing=0
+          for f in $(git ls-files); do
+            if [ -s "$f" ] && [ -n "$(tail -c1 "$f")" ]; then echo "::error file=$f::missing newline at end of file"; missing=1; fi
+          done
+          exit $missing
+
       - name: Check Markdown structure
         run: |
           status=0

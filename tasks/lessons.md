@@ -15,3 +15,7 @@
 ## Check inherited tooling rules too (2026-09-22)
 - **Mistake:** Recommended a CircleCI pipeline because the forked CLAUDE.md said so; the team uses GitHub Actions.
 - **Rule:** Same as the Lombok lesson — CI/CD, build and tooling rules in a forked CLAUDE.md may be upstream's. Default to GitHub Actions (`.github/workflows/`) here.
+
+## Files must end with a newline (2026-09-22)
+- **Mistake:** Edited upstream files (`pom.xml`, `plugin.json`, agents) without noticing they lacked a final newline; the PR diff flagged it.
+- **Rule:** Every file ends with `\n`. `.editorconfig` sets `insert_final_newline`, and CI checks all tracked files.

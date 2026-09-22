@@ -33,6 +33,7 @@
 - Always create test cases for the generated code both positive and negative.
 - Always generate a GitHub Actions workflow in `.github/workflows/` to verify the code (build and run all tests with `./mvnw -B verify` on pushes and pull requests to `main` and `develop`).
 - Minimize the amount of code generated.
+- Every file must end with a newline (see `.editorconfig`; CI fails otherwise).
 - The Maven artifact name must be the same as the parent directory name.
 - Use Semantic Versioning for the Maven project: bump MAJOR for breaking changes, MINOR for new backward-compatible features, PATCH for backward-compatible fixes.
 - Use Git Flow branches (`feature/*`, `release/*`, `hotfix/*` from `develop`/`main`) and Conventional Commits (`type(scope): subject`) for commit messages and PR titles.
