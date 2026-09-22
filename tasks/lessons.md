@@ -19,3 +19,7 @@
 ## Files must end with a newline (2026-09-22)
 - **Mistake:** Edited upstream files (`pom.xml`, `plugin.json`, agents) without noticing they lacked a final newline; the PR diff flagged it.
 - **Rule:** Every file ends with `\n`. `.editorconfig` sets `insert_final_newline`, and CI checks all tracked files.
+
+## Renaming a PR's head branch closes the PR (2026-09-22)
+- **Mistake:** Told the user GitHub keeps a PR attached when its head branch is renamed. Renaming `feature/spring-boot-4-upgrade` recorded `head_ref_deleted` and auto-closed PR #1; a new PR (#2) had to be opened.
+- **Rule:** Pick the final branch name before opening the PR. If a rename is needed later, warn that the PR will close and must be recreated (or keep the old name).
