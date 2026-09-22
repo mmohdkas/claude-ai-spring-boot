@@ -48,6 +48,6 @@ jobs:
           done
           exit $status
 
-      # Extracts the java blocks from .claude/skills and compiles/tests them against Spring Boot 4
+      # Extracts the java blocks from .claude/skills and compiles/tests them against Spring Boot 4.1
       - name: Verify doc snippets
         run: mvn -B -ntp -f .github/doc-snippets/pom.xml verify

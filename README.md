@@ -5,7 +5,7 @@ This template provides a structured starting point for Spring Boot applications,
 The idea behind this template is that you can just clone this repository and use it to generate the app you want with Claude Code.
 
 > **Fork note:** this is a fork of [piomin/claude-ai-spring-boot](https://github.com/piomin/claude-ai-spring-boot),
-> updated for **Spring Boot 4.x** (release 2.0.0) and adapted to use **Lombok** and the `edu.iu.es.ep` group ID / base package.
+> updated for **Spring Boot 4.1** (release 2.0.0) and adapted to use **Lombok** and the `edu.iu.es.ep` group ID / base package.
 
 ```shell
 .
@@ -53,11 +53,24 @@ The idea behind this template is that you can just clone this repository and use
 ## CI
 
 The `CI` workflow extracts every java block from `.claude/skills` (see `.github/doc-snippets/extract.py`),
-compiles it against Spring Boot 4 and runs the test snippets. Run it locally with:
+compiles it against Spring Boot 4.1 and runs the test snippets. Run it locally with:
 
 ```bash
 mvn -B -f .github/doc-snippets/pom.xml verify
 ```
+
+## Upgrading to a New Spring Boot Minor (e.g. 4.2)
+
+Each Spring Boot minor gets its own release of this template:
+
+1. Branch `feature/spring-boot-4.2-upgrade` from `develop`.
+2. Bump the parent in `.github/doc-snippets/pom.xml` to the new version. It is the version CI verifies the docs against.
+   Fix whatever `mvn -B -f .github/doc-snippets/pom.xml verify` breaks.
+3. Read the Spring Boot release notes / migration guide and update the skills (new APIs, deprecations, property renames).
+   Also check the matching Spring Cloud release train in `references/cloud.md`.
+4. Update the target-version mentions: `git grep -n "4\.1"`.
+5. Pick the version by SemVer: MINOR if the guidance only adds or updates, MAJOR if it removes or replaces patterns.
+   Add a changelog entry, then release through `release/x.y.z` → `main` and tag `vx.y.z`.
 
 ## Target Stack
 
@@ -69,10 +82,10 @@ Spring Boot 4.1.x (Spring Framework 7, Spring Security 7, Hibernate 7, Jackson 3
 **Breaking changes**
 - Group ID / base package changed from `pl.piomin.services` to `edu.iu.es.ep`
 - Lombok is now required by the conventions (the upstream "no Lombok" rule is reversed)
-- Spring Boot 3.x guidance removed; examples target Spring Boot 4.x only
+- Spring Boot 3.x guidance removed; examples target Spring Boot 4.1 only
 
 **Changes**
-- Skills and agents updated from Spring Boot 3.x to 4.x:
+- Skills and agents upgraded from Spring Boot 3.x to 4.1:
   - modular starters (`-webmvc`, `-restclient`, per-module test starters)
   - `@MockitoBean` instead of the removed `@MockBean`
   - `RestTestClient`, Testcontainers 2 + `@ServiceConnection`
@@ -83,7 +96,7 @@ Spring Boot 4.1.x (Spring Framework 7, Spring Security 7, Hibernate 7, Jackson 3
 - Git Flow, Conventional Commits and Semantic Versioning documented in CLAUDE.md
 - CI/CD convention switched from CircleCI to GitHub Actions
 - GitHub Actions `CI` workflow: checks Markdown structure and compiles/tests the skills' java blocks
-  against Spring Boot 4 (`.github/doc-snippets`); required on `main` and `develop`
+  against Spring Boot 4.1 (`.github/doc-snippets`); required on `main` and `develop`
 - Restored `jpa-patterns` and `logging-patterns` skills that had been truncated mid-file
 - Fixed non-compiling examples (text block, filter signature, effectively-final lambda capture, mixed repository/service code)
 - Removed non-functional "context manager" protocol from agents; agent cross-references now point only to agents in this repo

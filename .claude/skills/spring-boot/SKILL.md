@@ -1,6 +1,6 @@
 ---
 name: spring-boot
-description: Spring Boot 4.x development - REST APIs, JPA, Security, Testing, and Cloud-native patterns. Use for building enterprise Java applications with Spring Boot.
+description: Spring Boot 4.1 development - REST APIs, JPA, Security, Testing, and Cloud-native patterns. Use for building enterprise Java applications with Spring Boot.
 metadata:
   version: "3.0.0"
   domain: backend
@@ -12,7 +12,7 @@ metadata:
 
 # Spring Boot Skill
 
-Enterprise Spring Boot 4.x development with focus on clean architecture and production-ready code.
+Enterprise Spring Boot 4.1 development with focus on clean architecture and production-ready code.
 
 ## Core Workflow
 
@@ -306,4 +306,4 @@ public class SecurityConfig {
 
 ## Knowledge Base
 
-Spring Boot 4.x, Spring Framework 7, Java 25 (17+ minimum), Spring WebMVC, Spring WebFlux, Project Reactor, Spring Data JPA, Hibernate 7, Spring Security 7, OAuth2/JWT, Jackson 3, R2DBC, Spring Cloud 2025.1, Resilience4j, Micrometer, OpenTelemetry, JUnit 6, Testcontainers 2, Mockito, Lombok, Maven/Gradle
+Spring Boot 4.1, Spring Framework 7, Java 25 (17+ minimum), Spring WebMVC, Spring WebFlux, Project Reactor, Spring Data JPA, Hibernate 7, Spring Security 7, OAuth2/JWT, Jackson 3, R2DBC, Spring Cloud 2025.1, Resilience4j, Micrometer, OpenTelemetry, JUnit 6, Testcontainers 2, Mockito, Lombok, Maven/Gradle

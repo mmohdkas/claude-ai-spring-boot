@@ -15,7 +15,7 @@ Each skill folder contains:
 
 | Skill | Description |
 |-------|-------------|
-| [spring-boot](spring-boot/) | Spring Boot 4.x - REST APIs, JPA, Security, Testing, Cloud (with `references/`) |
+| [spring-boot](spring-boot/) | Spring Boot 4.1 - REST APIs, JPA, Security, Testing, Cloud (with `references/`) |
 | [jpa-patterns](jpa-patterns/) | JPA/Hibernate patterns and pitfalls (N+1, lazy loading, transactions, Lombok on entities) |
 | [logging-patterns](logging-patterns/) | Structured logging (JSON), SLF4J fluent API, MDC, AI-friendly formats |
 | [code-quality](code-quality/) | Java code review - clean code, API contracts, null safety, exceptions, performance |
@@ -28,7 +28,7 @@ Each skill folder contains:
 - [ ] **No significant overlap** - Check the table above for similar skills
 - [ ] **Clear type** - Audit (review existing code) or Template (show how to write)
 - [ ] **Focused scope** - Can be applied in one session (<15 checklist items)
-- [ ] **Current versions** - Examples target Spring Boot 4.x and compile
+- [ ] **Current versions** - Examples target the current Spring Boot minor (4.1) and pass CI
 
 ### Implementation Steps
 
